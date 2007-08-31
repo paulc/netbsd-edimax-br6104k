@@ -1,0 +1,32 @@
+#	$NetBSD: mtree.common,v 1.6 2006/11/11 14:47:27 jmmv Exp $
+
+/set				type=dir uname=root gname=wheel mode=0755
+
+.
+./bin
+./dev
+./etc
+./etc/rc.d
+./etc/defaults
+./lib
+./libexec
+./mnt
+./kern
+./root
+./sbin
+./tmp				mode=01777
+./usr
+./usr/bin
+./usr/lib
+./usr/libexec
+./usr/mdec
+./usr/sbin
+./usr/share
+./usr/share/misc
+./var
+./var/db
+./var/run
+./var/log
+./var/spool
+./var/spool/lock
+./var/tmp			mode=01777
