@@ -1,0 +1,138 @@
+Index: sys/arch/mips/mips/locore.S
+===================================================================
+RCS file: /cvsroot/src/sys/arch/mips/mips/locore.S,v
+retrieving revision 1.166
+diff -c -r1.166 locore.S
+*** sys/arch/mips/mips/locore.S	17 May 2007 14:51:23 -0000	1.166
+--- sys/arch/mips/mips/locore.S	29 Aug 2007 22:44:03 -0000
+***************
+*** 69,74 ****
+--- 69,78 ----
+  
+  	.globl	start
+  	.globl	_C_LABEL(kernel_text)		# libkvm refers this
++ #if defined(ADM5120_EDIMAX)
++     /* EDIMAX BR6104 entry point */
++     .fill   0x6d8
++ #endif
+  start:
+  _C_LABEL(kernel_text):
+  #if defined(MIPS3_PLUS) && !defined(MIPS1)
+Index: sys/arch/evbmips/adm5120/machdep.c
+===================================================================
+RCS file: /cvsroot/src/sys/arch/evbmips/adm5120/machdep.c,v
+retrieving revision 1.2
+diff -c -r1.2 machdep.c
+*** sys/arch/evbmips/adm5120/machdep.c	17 May 2007 14:51:17 -0000	1.2
+--- sys/arch/evbmips/adm5120/machdep.c	29 Aug 2007 22:45:02 -0000
+***************
+*** 207,212 ****
+--- 207,216 ----
+  static void
+  copy_args(int argc, char **argv)
+  {
++ #ifdef ADM5120_EDIMAX
++     /* EDIMAX BR6104 doesn't pass boot args */
++     return;
++ #else
+  	struct adm5120_config *admc = &adm5120_configuration;
+  	int i;
+  	char *buf;
+***************
+*** 232,237 ****
+--- 236,242 ----
+  		panic("%s: boot args too long\n", __func__);
+  
+  	admc->argc = argc;
++ #endif
+  }
+  
+  static void
+***************
+*** 349,355 ****
+--- 354,363 ----
+  	 * Initialize bus space tags.
+  	 */
+  	obio_bus_mem_init(&admc->obio_space, admc);
++ #ifndef ADM5120_EDIMAX
++     /* Not present on EDIMAX BR6104 board */
+  	extio_bus_mem_init(&admc->extio_space, admc);
++ #endif
+  #if NPCI > 0
+  	pciio_bus_mem_init(&admc->pciio_space, admc);
+  	pcimem_bus_mem_init(&admc->pcimem_space, admc);
+Index: sys/arch/evbmips/conf/ADM5120-EDIMAX
+===================================================================
+RCS file: sys/arch/evbmips/conf/ADM5120-EDIMAX
+diff -N sys/arch/evbmips/conf/ADM5120-EDIMAX
+*** /dev/null	1 Jan 1970 00:00:00 -0000
+--- sys/arch/evbmips/conf/ADM5120-EDIMAX	29 Aug 2007 22:45:02 -0000
+***************
+*** 0 ****
+--- 1,49 ----
++ #   $NetBSD: ADM5120-USB,v 1.2 2007/04/03 21:54:01 dyoung Exp $
++ #
++ # Kernel config for the Edimax BR-6104KP/Sweex LB000021 routers
++ 
++ include     "arch/evbmips/conf/std.adm5120"
++ makeoptions CPUFLAGS="-march=4kc -DADM5120_EDIMAX -DMEMSIZE=16777216"
++ 
++ maxusers    32
++ 
++ options     MIPS32
++ options     NOFPU
++ options     SOFTFLOAT
++ options     CONSPEED=115200
++ options     HZ=512
++ options     KERNEL_ENTRY_OFFSET=0x6d8 
++ 
++ file-system FFS
++ file-system MFS
++ file-system MSDOSFS
++ 
++ options     INET
++ config      netbsd root on ? type ?
++ 
++ mainbus0    at root
++ 
++ cpu0        at mainbus?
++ 
++ pseudo-device bpfilter    4
++ pseudo-device loop
++ pseudo-device pty
++ pseudo-device rnd
++ pseudo-device md          1
++ 
++ obio*       at mainbus?
++ gpio*       at mainbus?
++ 
++ uart*       at obio? addr ?
++ admsw*      at obio? addr ?
++ 
++ ahci*       at obio? addr ?
++ usb*        at ahci?
++ uhub*       at usb?
++ uhub*       at uhub? port ? configuration ? interface ?
++ ugen*       at uhub? port ?
++ umass*      at uhub? port ?
++ wd*         at umass?
++ 
++ options     MSGBUFSIZE=8192
++ 
+Index: sys/arch/evbmips/conf/ADM5120-EDIMAX-MFS
+===================================================================
+RCS file: sys/arch/evbmips/conf/ADM5120-EDIMAX-MFS
+diff -N sys/arch/evbmips/conf/ADM5120-EDIMAX-MFS
+*** /dev/null	1 Jan 1970 00:00:00 -0000
+--- sys/arch/evbmips/conf/ADM5120-EDIMAX-MFS	29 Aug 2007 22:45:02 -0000
+***************
+*** 0 ****
+--- 1,8 ----
++ 
++ include     "arch/evbmips/conf/ADM5120-EDIMAX"
++ 
++ options        MEMORY_RBFLAGS=0
++ options        MEMORY_DISK_HOOKS
++ options        MEMORY_DISK_IS_ROOT     
++ options        MEMORY_DISK_SERVER=1
++ options        MEMORY_DISK_ROOT_SIZE=8000
