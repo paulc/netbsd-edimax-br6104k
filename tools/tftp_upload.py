@@ -3,44 +3,91 @@
    Upload firmware to ADM5120 router.
 
    bifferos@yahoo.co.uk  2007
+
+   Modified by PaulC -
+
+   - Support --write option to write image to flash
+   - Add basic checks on image size/format
+   - Modify TFTP server to serve firmware image directly (ignores requested 
+     filename to get round bootloader filename restrictions)
+   - Try to guess a reasonable default for tty & netif based on platform
+
 """
 import fdpexpect, os, sys, tempfile, struct, termios, time, thread
 from optparse import OptionParser
 
-import string, struct, socket, select, thread, StringIO, os, gzip
+import string, struct, socket, select, thread, StringIO, os, gzip, glob
 
 
 g_usage = "%prog [options] <image filename>"
 
 g_description = """
-This program expects to connect to a BR-6104K(P) running Vlad's ftp bootloader.
-The program waits for the ADM5120 to power up, then configures the
-bootloader tftp parameters, starts a tftp server and transfers the specified
-kernel image to either DRAM or Flash.
+This program connects to the console port on a BR-6104K(P) running the Midge
+TFTP bootloader (http://midge.vlad.org.ua/wiki/bootloader-with-tftp).  The
+program waits for the BR-6104K to power up, then configures the bootloader tftp
+parameters, starts a tftp server, transfers the specified kernel image to
+either DRAM or Flash, and then sttarts a console terminal session.  
 """
 
-opt = OptionParser(version="%prog v2.1", usage=g_usage, 
-                   description=g_description)
-opt.add_option("-d","--device", dest="device", default="/dev/tty.usbserial-FTD2W8AR",
+tty_default = "/dev/ttyS0"
+net_default = "eth0"
+use_route = False
+
+if 'bsd' in sys.platform:
+    tty_default = "/dev/ttyU0"
+    use_route = True
+elif 'darwin' in sys.platform:
+    tty_default = glob.glob("/dev/tty.usbserial*")[0]
+    use_route = True
+
+opt = OptionParser(usage=g_usage, description=g_description)
+opt.add_option("-d","--device", dest="device", default=tty_default,
                help="Serial communication device (default: %default)")
 opt.add_option("-a","--address", dest="address", default="10.0.0.30",
                help="BR-6104KP IP address for tftp client (default: %default)")
-opt.add_option("-n","--netif", dest="netif", default="en0",
-               help="Network interface for tftp server (default: %default)")
 opt.add_option("-w","--write", dest="write", default=False, action="store_true",
                help="Write image to flash (default: False)")
+opt.add_option("-p","--port", dest="port", default=69, type=int,
+               help="TFTP port (default: 69)")
+if not use_route:
+    opt.add_option("-n","--netif", dest="netif", default=net_default,
+                   help="Network interface for tftp server (default: %default)")
 
 (opts, args) = opt.parse_args()
 
-if not args or not os.path.isfile(args[0]) :
+if not os.path.isfile(args[0]) :
         opt.print_help()
         sys.exit(0)
 
+def parse_ifconfig_linux(interface):
+    """Extract interface address from ifconfig output"""
+    return [ x.split()[1][5:] for x in 
+                os.popen("/sbin/ifconfig %s" % interface).readlines() 
+                if x.strip().startswith('inet') ][0]
 
+def parse_ifconfig_bsd(interface):
+    """Extract interface address from ifconfig output"""
+    return [ x.split()[1] for x in 
+                os.popen("/sbin/ifconfig %s inet" % interface).readlines() 
+                if x.strip().startswith('inet') ][0]
 
+def parse_route_bsd(address):
+    """Extract local interface address for target ip from route output"""
+    route = [x.strip() for x in os.popen("/sbin/route -n get %s" % address)]
+    try:
+        return [x.split(': ')[1] for x in route if x.startswith('local addr:')][0]
+    except IndexError:
+        netif = [x.split(': ')[1] for x in route if x.startswith('interface:')][0]
+        return parse_ifconfig_bsd(netif)
+    
 # IP address of the server (this machine) 
-TFTP_HOST = [ x.split()[1] for x in os.popen("/sbin/ifconfig %s inet" % opts.netif).readlines() 
-                                 if x.strip().startswith('inet') ][0]
+if use_route:
+    opts.tftp_host = parse_route_bsd(opts.address)
+else:
+    if sys.platform.startswith('linux'):
+        opts.tftp_host = parse_ifconfig_linux(opts.netif)
+    else:
+        opts.tftp_host = parse_ifconfig_bsd(opts.netif)
 
 #
 # TFTP Errors
@@ -300,22 +347,21 @@ class TFTPServer:
 # Subclass to create our own TFTP Connection object
 #
 
-
 def tftp_server(data):
     class MyTFTP( TFTPConnection ):
         def readRequest(self, filename, mode):
-            print "tftp request:",filename
             return StringIO.StringIO(data)
         def writeRequest(self, filename, mode):
             raise TFTPError(4, "Bad request")
     try:
-        serv = TFTPServer("",69,conn=MyTFTP)
+        serv = TFTPServer("",opts.port,conn=MyTFTP)
+        # Only serve single request and exit
         serv.serve()
     except KeyboardInterrupt, SystemExit:
         pass
 
 def SetupSerial(device) :
-  print "Setting device '%s' to 112500, 8N1" % device
+  print "--> Setting device '%s' to 112500, 8N1" % device
   fd = os.open(device, os.O_RDWR|os.O_NONBLOCK)
   params = termios.tcgetattr(fd)
   params[0] = termios.IGNBRK        # iflag, 1
@@ -333,18 +379,20 @@ def SetupSerial(device) :
 
 def Upload(image, device, write=False) :
 
-  print "Connecting to serial device..."
+  print "--> Connecting to serial device..."
   fd = os.open(device, os.O_RDWR|os.O_NONBLOCK|os.O_NOCTTY)
   m = fdpexpect.fdspawn(fd)
   m.setecho(False)
 
-  print "Waiting for device to be switched on...."
+  print "--> Waiting for device to be switched on...."
 
   # Wait for device to power up
   m.expect("to enter boot menu..")
 
   # Three spaces to interrupt the boot
   m.send("   ")
+
+  print "--> Configuring bootloader..."
   m.expect("Please enter your number:")
 
   # Set parameters
@@ -364,7 +412,7 @@ def Upload(image, device, write=False) :
   m.expect("Enter your option:")
   m.send("s")
   m.expect("TFTP Server IP : ")
-  m.send("%s\n" % TFTP_HOST)
+  m.send("%s\n" % opts.tftp_host)
   m.expect("Remote File Name : ")
   m.send("boot\n")
   m.expect("Enter your option:")
@@ -373,10 +421,10 @@ def Upload(image, device, write=False) :
   m.send("x")
   m.expect("enter your number:")
   if write:
-      print "Writing image to Flash..."
+      print "--> Writing image to Flash..."
       m.send("7")    # write to flash
   else:
-      print "Starting from SDRAM..."
+      print "--> Starting from SDRAM..."
       m.send("6")    # start from DRAM
   # Done with expect, close the device
   m.read_nonblocking()
@@ -387,8 +435,8 @@ def Upload(image, device, write=False) :
   m = fdpexpect.fdspawn(fd)
 
   # Connect to the terminal
+  print "--> Starting terminal session (^] to exit)"
   m.interact()
-
 
 def check_csys(fname):
     csys = "CSYS\x00\x00\x50\x80"
@@ -404,8 +452,20 @@ if __name__ == '__main__':
     fname = args[0]
     data = open(fname).read()
 
+    print """
+TFTP Upload
+-----------
+
+Device           : %s
+Target Address   : %s
+Host Address     : %s
+TFTP Port        : %s
+Write Flash      : %s
+
+""" % (opts.device, opts.address, opts.tftp_host, opts.port, opts.write)
+
     if check_gzip(data):
-        print "Gzip Image: %s (Original File: %s, Length: %dKb)" % \
+        print "--> Gzip Image: %s (Original File: %s, Length: %dKb)" % \
                         (fname,gzip_filename(data),len(data)/1024)
     else:
         raise Exception("Invalid Image format")
@@ -414,10 +474,12 @@ if __name__ == '__main__':
         raise Exception("Image too large (max size 1984Kb)")
         
     try:
-        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).bind(("",69))
+        # Try to bind to TFTP port outside tftpd worker thread so that we can 
+        # exit cleanly if exception raised
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).bind(("",opts.port))
         thread.start_new_thread(tftp_server,(data,))
         SetupSerial(opts.device)
         Upload(fname,opts.device,opts.write)
     except socket.error, e:
-        print "Unable to bind to TFTP port:", e[1]
+        print "--> Unable to bind to TFTP port:", e[1]
 
