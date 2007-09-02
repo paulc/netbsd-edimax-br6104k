@@ -1,0 +1,17 @@
+
+NETBSDSRCDIR	 =	/usr/src
+TOOLDIR			 =  /usr/src/tooldir.NetBSD-3.1-i386
+DESTDIR			 =  /usr/src/obj/destdir.evbmips
+CC				:=	$(TOOLDIR)/bin/mipsel--netbsd-gcc
+
+CPPFLAGS		:= 	-nostdinc -isystem $(DESTDIR)/usr/include
+CFLAGS			:= 	-O2 -Wall
+LDFLAGS			:=	-Wl,-nostdlib -Wl,-dynamic-linker=/libexec/ld.elf_so \
+					-Wl,-rpath-link,$(DESTDIR)/lib:$(DESTDIR)/usr/lib -Wl,-Bstatic \
+					-B$(DESTDIR)/usr/lib/ -L$(DESTDIR)/lib -L$(DESTDIR)/usr/lib 
+
+MAKEOBJDIR		 = ./obj
+OPTIONS			?= 
+
+config:
+	CC=$(CC) CPP="$(CC) -E $(CPPFLAGS)" CPPFLAGS="$(CPPFLAGS)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" ./configure $(OPTIONS)
