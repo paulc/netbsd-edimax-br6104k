@@ -1,0 +1,46 @@
+
+NETBSDSRCDIR	 =	/usr/src
+TOOLDIR			 =  /usr/src/tooldir.NetBSD-3.1-i386
+DESTDIR			 =  /usr/src/obj/destdir.evbmips
+CC				:=	$(TOOLDIR)/bin/mipsel--netbsd-gcc
+LD				:=	$(TOOLDIR)/bin/mipsel--netbsd-ld
+STRIP			:=	$(TOOLDIR)/bin/mipsel--netbsd-strip
+OBJCOPY			:=	$(TOOLDIR)/bin/mipsel--netbsd-objcopy
+
+CPPFLAGS		:= 	-nostdinc -isystem $(DESTDIR)/usr/include
+CFLAGS			:=  
+LDFLAGS			:=	-Wl,-nostdlib -B$(DESTDIR)/usr/lib/ -L$(DESTDIR)/lib -L$(DESTDIR)/usr/lib 
+
+MKOBJDIR		?= ./obj
+
+TARGET          ?= stand
+CRUNCH_FLAGS	?= SMALLPROG=1 SMALLPROG_INET6=1
+
+
+all: $(TARGET).strip
+
+$(TARGET).strip: $(TARGET)
+	cp $(TARGET) $(TARGET).strip
+	$(STRIP) $(TARGET).strip
+
+$(TARGET): $(TARGET).mk 
+	CC=$(CC) \
+	LD=$(LD) \
+	STRIP=$(STRIP) \
+	OBJCOPY=$(OBJCOPY) \
+	CPPFLAGS="$(CPPFLAGS)" \
+	CFLAGS="$(CFLAGS)" \
+	LDFLAGS="$(LDFLAGS)" \
+	$(CRUNCH_FLAGS) \
+	make -f $(TARGET).mk objs exe
+
+# Need to add <stdlib.h> to includes
+$(TARGET).mk: $(.CURDIR)/$(TARGET).conf
+	crunchgen -f $(.CURDIR)/$(TARGET).conf
+	printf '/#include <stdio.h>\na\n#include <stdlib.h>\n.\nwq\n' | ex -s $(TARGET).c
+
+clean: 
+	make -f $(TARGET).mk clean
+
+#	rm -f $(TARGET) $(TARGET).strip $(TARGET).c $(STAND).ln $(TARGET).cache $(TARGET).mk *.cro *.syms *.o *~ [Ee]rrs
+#	find . -type d ! -name . | xargs rm -rf
